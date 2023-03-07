@@ -1,5 +1,11 @@
 #### functions ####
 # These are functions used for trio mapping
+library(parallel)
+library(MASS)
+library(foreach)
+library(doParallel)
+library(tidyverse)
+library(lattice)
 
 ### 1. get genotype data (table)
 convertFpStringToGeno <- function(df,fpGeno,markerMap){
