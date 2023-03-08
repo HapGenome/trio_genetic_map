@@ -29,11 +29,13 @@ convertFpStringToGeno <- function(df,fpGeno,markerMap){
 }
 
 ### 2. recombination rate
-infoMarkerByLine <- function(df,fpDataVec,nCores,tmpFolder){
+infoMarkerByLine <- function(df,fpDataVec,nCores,tmpFolder,genos = c("AA","TT","CC","GG")){
   # This function is to find informative markers for each trio and then return its status by line: P1 or P2
+  # df: the file with pedigree information; containing at least three columns: "pedigree", "prt1", "prt2"
+  # fpDataVec: a table format, with row as the number of markers and column as the number of lines
   # data will be saved by each line
   # missing data and het call in any parent will not be considered as informative
-
+  if(!dir.exists(tmpFolder)){dir.create(tmpFolder)}
   numCores <- detectCores()
   if(nCores < numCores){
     registerDoParallel(nCores)
@@ -55,15 +57,14 @@ infoMarkerByLine <- function(df,fpDataVec,nCores,tmpFolder){
     
     for(k in 1:nrow(subDf)){
       qLine <- subDf$pedigree[k]
-      prts <- unlist(str_split(subDf$parents[k],";"))
+      prts <- c(subDf$prt1[k],subDf$prt2[k])
       if(all(c(qLine,prts) %in% colnames(fpDataVec))){
-        tmpData <- fpDataVec[,c(qLine,prts)]
+        tmpData <- fpDataVec[,as.character(c(qLine,prts))]
         colnames(tmpData) <- c("O","P1","P2")
         
         # 1) skip if any missing data or heterozygous presents
-        tmpData <- subset(tmpData,!str_detect(O,"\\.|[hHnN]") & !str_detect(P1,"\\.|[hHnN]") & !str_detect(P2,"\\.|[hHnN]") & P1 != P2)
-        tmpDataMarkers <- row.names(tmpData)
-        tmpData$markers = tmpDataMarkers
+        tmpData <- tmpData %>% filter(O %in% genos,P1 %in% genos, P2 %in% genos,P1 != P2)
+        tmpData$markers = row.names(tmpData)
         tmpData$parent <- ifelse(tmpData$O == tmpData$P1,1,2)
         
         # 2) skip if no data or only one parental genotype
@@ -81,13 +82,13 @@ collectAllInfoMarkers <- function(tmpFolder){
   # collect all infoMarkerByLine results
   
   allFiles = list.files(tmpFolder)
-  lineRes = data.frame()
+  lineRes = data.frame(line=as.character(),p1Count = as.numeric(),p2Count = as.numeric())
 
   for(fileName in allFiles){
-    tmpData = read.csv(fileName)
+    tmpData = read.csv(paste0(tmpFolder,"/",fileName))
     qLine = unlist(strsplit(fileName,"\\."))[1]
     tmpData$line = qLine
-    lineRes = bind_rows(lineRes,tmpData)
+    lineRes = bind_rows(lineRes,data.frame(line = qLine,p1Count = table(tmpData$parent)[1],p2Count = table(tmpData$parent)[2]))
   }
   return(lineRes)
 }
@@ -95,12 +96,11 @@ collectAllInfoMarkers <- function(tmpFolder){
 # for any pair of markers, count #totalTros and #recombinedTrios
 # Output are two matrix, each one is a large matrix with the dimension as #markers x #markers (around 65k x 65k)
 
-generateRecData = function(tmpFolder,markerMap,outFileFolder,verbose = TRUE){
+generateRecData = function(tmpFolder,allMarkers,outFileFolder,verbose = TRUE){
   # This function is to generate recbinate rate for any pair of markers
   # For every trio, collect the informative markers and found which pair of markers are recombined (saved at tmpFolder)
   # collect all infoMarkerByLine results, and then count recombined lines and non-recombined lines;
-  
-  allMarkers = markerMap$markerName
+  if(!dir.exists(outFileFolder)){dir.create(outFileFolder)}
   
   testResEffCount <- data.frame(matrix(0,nrow=length(allMarkers),ncol=length(allMarkers)))
   row.names(testResEffCount) <- allMarkers
@@ -117,7 +117,7 @@ generateRecData = function(tmpFolder,markerMap,outFileFolder,verbose = TRUE){
   for(fileName in allFiles){
     count = count + 1
     if((count-1) %% 1000 == 0 & verbose){print(paste("Processed",count,"lines;",Sys.time()))}
-    tmpData = read.csv(fileName)
+    tmpData = read.csv(paste0(tmpFolder,"/",fileName))
     qLine = unlist(strsplit(fileName,"\\."))[1]
 
     testedMarkers = unique(c(testedMarkers,tmpData$markers))
