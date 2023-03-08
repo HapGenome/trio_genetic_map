@@ -1,7 +1,7 @@
 #### functions ####
 # These are functions used for trio mapping
 
-### 1. get genotype data (table)
+### 1. genotype data (table): Convert fpString to table format
 convertFpStringToGeno <- function(df,fpGeno,markerMap){
   # this function is to convert fpString to a table format, with row as the number of markers and column as the number of lines;
   # df is the file with pedigree information; containing at least three columns: "pedigree", "prt1", "prt2"
