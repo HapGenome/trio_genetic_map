@@ -148,11 +148,11 @@ generateRecData = function(tmpFolder,allMarkers,outFileFolder,verbose = TRUE){
 
 ### 3. define groups and determine anchors
 # find closely linked markers
-getLinkedMarkerInfo <- function(phyPos,testMarkers, testTrioCount, totalRecRate, markerMap,minCount, maxRecRate){
+getLinkedMarkerInfo <- function(phyPos,testMarkers, testTrioCount, totalRecRate,minCount, maxRecRate){
   # For each marker, find other markers that linked with this marker and summarize the linkage information;
   # return summarized information
   
-  res <- phyPos %>% filter(Q_ID %in% testMarkers) %>% select(Q_ID, chr, Sbegin, Send)
+  res <- phyPos %>% filter(Q_ID %in% testMarkers) %>% select(Q_ID, chr, Sbegin)
   row.names(res) = res$Q_ID
   res = res[testMarkers,]
   res$chrDist <- NA
@@ -180,7 +180,6 @@ getLinkedMarkerInfo <- function(phyPos,testMarkers, testTrioCount, totalRecRate,
   res$numLinkedChr = sapply(res$chrDist,function(x){return(length(unlist(strsplit(x,";"))))})
   res$index = 1:nrow(res)
   
-  res = left_join(res,markerMap[,c(2:6)],by=c("Q_ID" = "markerName"))
   return(res)
 }
 
@@ -323,12 +322,12 @@ getGroupAnchorDiff <- function(anchors, pwDist = subPwGroupSm){
   
 }
 
-findAnchorsByChr = function(testChr, res_2, testTrioCount, totalRecRate) {
-  
-  minCount = 200
-  testChrData = res_2 %>% filter(chr == testChr, chrDist == testChr, totalMkLinkedOwnChr >= 5) %>% arrange(Sbegin)
+findAnchorsByChr = function(testChr, res_2, totalTrioCount, totalRecRate,tmpOutFolder,minCount = 200,minLinkedMk = 5,
+                            mkPerGroup = 10,minDataPoint = 80, minDataPointPerMk = 5, maxDist = 0.5,numOfDataBwGroups = 20) {
+  if(!dir.exists(tmpOutFolder)){dir.create(tmpOutFolder)}
+  testChrData = res_2 %>% filter(chr == testChr, chrDist == testChr, totalMkLinkedOwnChr >= minLinkedMk) %>% arrange(Sbegin)
   testChrMk = testChrData$Q_ID
-  chrRecCount = testTrioCount[testChrMk,testChrMk]
+  chrRecCount = totalTrioCount[testChrMk,testChrMk]
   chrRecRate = totalRecRate[testChrMk,testChrMk]
   chrRecCount = ifelse(chrRecCount >= minCount,1,NA)
   chrRecRate = as.matrix(chrRecRate * chrRecCount)
@@ -355,17 +354,17 @@ findAnchorsByChr = function(testChr, res_2, testTrioCount, totalRecRate) {
   # summarize within group map distance; Ignore markers that are questionable
   
   subChrData = testChrData %>% filter(!Q_ID %in% offPosMks) %>% arrange(Sbegin)
-  write.csv(subChrData,paste0("/mnt/tmpData/tmpAnchorData/subChrData_chr",testChr,".csv"))
+  write.csv(subChrData,paste0(tmpOutFolder,"/subChrData_chr",testChr,".csv"))
   
   subChrMapDist = chrMapDist[subChrData$Q_ID,subChrData$Q_ID]
-  saveRDS(subChrMapDist,paste0("/mnt/tmpData/tmpAnchorData/subChrMapDist_chr",testChr,".rds"))
+  saveRDS(subChrMapDist,paste0(tmpOutFolder,"/subChrMapDist_chr",testChr,".rds"))
   
-  numOfGroups = nrow(subChrData) - 9
-  groupSm = data.frame(gIndex = 1:numOfGroups,numOfData = rep(NA,numOfGroups),minDataPerMk = rep(NA,numOfGroups),min=rep(NA,numOfGroups),
-                       max = rep(NA,numOfGroups), mean = rep(NA,numOfGroups), median = rep(NA,numOfGroups),std = rep(NA,numOfGroups))
+  numOfGroups = nrow(subChrData) - (mkPerGroup - 1)
+  groupSm = data.frame(gIndex = 1:numOfGroups,numOfData = rep(NA,numOfGroups),minDataPerMk = rep(NA,numOfGroups),minD=rep(NA,numOfGroups),
+                       maxD = rep(NA,numOfGroups), meanD = rep(NA,numOfGroups), medianD = rep(NA,numOfGroups),stdD = rep(NA,numOfGroups))
   for(i in 1:numOfGroups){
     st = i
-    ed = i + 9
+    ed = i + (mkPerGroup - 1)
     posIndex = st:ed
     subMapDist = subChrMapDist[posIndex,posIndex]
     groupSm[i,] = c(i,length(which(subMapDist >= 0)),min(apply(subMapDist,1,function(x){length(which(x >=0))})),min(subMapDist,na.rm = T),
@@ -373,22 +372,22 @@ findAnchorsByChr = function(testChr, res_2, testTrioCount, totalRecRate) {
     
   }
   
-  write.csv(groupSm,paste0("/mnt/tmpData/tmpAnchorData/groupSm_chr",testChr,".csv"))
+  write.csv(groupSm,paste0(tmpOutFolder,"/groupSm_chr",testChr,".csv"))
   
   pwGroupSm = matrix(NA,nrow=numOfGroups,ncol=numOfGroups)
   
   for(i in 1:numOfGroups){
     st1 = i
-    ed1 = i + 9
+    ed1 = i + (mkPerGroup - 1)
     for(j in i:numOfGroups){
       st2 = j
-      ed2 = j + 9
+      ed2 = j + (mkPerGroup - 1)
       if(i == j){
         pwGroupSm[i,j] = 0
         pwGroupSm[j,i] = 0
       }else{
         subMapDist = subChrMapDist[st1:ed1,st2:ed2]
-        if(length(which(subMapDist >= 0)) >= 20){
+        if(length(which(subMapDist >= 0)) >= numOfDataBwGroups){
           pwGroupSm[i,j] = mean(subMapDist,na.rm=T)
           pwGroupSm[j,i] = mean(subMapDist,na.rm=T)
         }
@@ -398,10 +397,10 @@ findAnchorsByChr = function(testChr, res_2, testTrioCount, totalRecRate) {
   }
   
   #print(levelplot(pwGroupSm, main=paste0("pwGroupSm: Chr",testChr, " (>= 20% data)"), xlab="", ylab=""))
-  saveRDS(pwGroupSm,paste0("/mnt/tmpData/tmpAnchorData/pwGroupSm_chr",testChr,".rds"))
+  saveRDS(pwGroupSm,paste0(tmpOutFolder,"/pwGroupSm_chr",testChr,".rds"))
   
   # pick groups that are most reliable
-  selGroupSm = groupSm %>% filter(numOfData >= 80, minDataPerMk >= 5, max <= 0.5)
+  selGroupSm = groupSm %>% filter(numOfData >= minDataPoint, minDataPerMk >= minDataPointPerMk, maxD <= maxDist)
   subPwGroupSm = pwGroupSm[selGroupSm$gIndex,selGroupSm$gIndex]
   
   # pdf(file=paste0("/mnt/results/20221024/heatmaps/PwGroupSm_Chr",testChr,".pdf"),width=12,height=12)
@@ -432,7 +431,7 @@ findAnchorsByChr = function(testChr, res_2, testTrioCount, totalRecRate) {
     anchorRes[i,9:10] = c(max(aeByAnchor/numByAnchor,na.rm=T),numByAnchor[which.max(aeByAnchor/numByAnchor)])
   }
   
-  write.csv(anchorRes,paste0("/mnt/tmpData/tmpAnchorData/anchorRes_chr",testChr,".csv"))
+  write.csv(anchorRes,paste0(tmpOutFolder,"/anchorRes_chr",testChr,".csv"))
 }
 
 
