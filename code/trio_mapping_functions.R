@@ -1,40 +1,46 @@
 #### functions ####
 # These are functions used for trio mapping
-library(parallel)
-library(MASS)
-library(foreach)
-library(doParallel)
-library(tidyverse)
-library(lattice)
+
+## load all required packages
+lapply(c('tidyverse','parallel','MASS','foreach','doParallel','lattice'), require, character.only = TRUE)
 
 ### 1. get genotype data (table)
-convertFpStringToGeno <- function(df,fpGeno,markerMap){
-  # this function is to convert fpString to a table format, with row as the number of markers and column as the number of lines;
-  # df is the file with pedigree information; containing at least three columns: "pedigree", "prt1", "prt2"
-  # fpGeno is the fpString collected by Danny and team
-  # markerMap is the genetic map for all the markers used in fpGeno
-  # takes about 3 mins to generate the fpMatrix for soybean: 67717 markers x 15634 lines
 
-  lines <- unique(c(df$pedigree,df$prt1,df$prt2))
-  fpDataVec <- data.frame(matrix("-",ncol=length(lines),nrow=nrow(markerMap)))
-  colnames(fpDataVec) <- lines
-  row.names(fpDataVec) <- markerMap$markerName
-  count = 0
+#'  This function is to convert fpString to a table format,with row as the number of markers and column as the number of lines;
+#'  takes about 3 mins to generate the fpMatrix for soybean: 67717 markers x 15634 lines
+#'  
+#' @param pedInfo data.frame the file with pedigree information; containing at least three columns: "pedigree", "prt1", "prt2"
+#' @param fpGenoe data.frame a table format, with row as line, and column V2 as the fpString for each line. Cloolected by Danny and team
+#' @param markerMap data.frame a table format; The genetic map for all the markers used in fpGeno
+#' 
+#' @return data.frame a table format, with row as the number of markers and column as the number of lines
+convertFpStringToGeno <- function(pedInfo,fpGeno,markerMap){
+  lines <- unique(c(pedInfo$pedigree,pedInfo$prt1,pedInfo$prt2))
+  fpDataVec <- data.frame(matrix("-",ncol=length(lines),nrow=nrow(markerMap),dimnames = list(markerMap$markerName, lines)))
   for(line in lines){
-    count = count + 1
-    str <- str_to_upper(fpGeno[line,"V2"])
-    fpDataVec[,line] <- unlist(str_split(str,""))
+    if(line %in% row.names(fpGeno)){
+      str <- str_to_upper(fpGeno[line,"V2"])
+      fpDataVec[,line] <- unlist(str_split(str,""))
+    }else{
+      warning(paste0("Warning!!! ",line," is not included in the fpGeno dataset"))
+    }
   }
   return(fpDataVec)
 }
 
 ### 2. recombination rate
-infoMarkerByLine <- function(df,fpDataVec,nCores,tmpFolder,genos = c("AA","TT","CC","GG")){
-  # This function is to find informative markers for each trio and then return its status by line: P1 or P2
-  # df: the file with pedigree information; containing at least three columns: "pedigree", "prt1", "prt2"
-  # fpDataVec: a table format, with row as the number of markers and column as the number of lines
-  # data will be saved by each line
-  # missing data and het call in any parent will not be considered as informative
+#### 2..1 informative markers by trio; Including matching status, P1 or P2;
+
+#'  This function is to find informative markers for each trio and then return its matching status with parents: P1 or P2
+#'
+#' @param pedInfo data.frame the file with pedigree information; containing at least three columns: "pedigree", "prt1", "prt2"
+#' @param fpDataVec data.frame a table format, with row as the number of markers and column as the number of lines
+#' @param nCores integer the number of cores to be used
+#' @param tmpFolder string a tmp folder to save the output
+#' @param genos vector<string> homozygous genotypes that the fpDataVec would include
+#' 
+#' @return null output is saved to tmpFolder in a csv format with one marker per row and following columns, O, P1, P2, markers, parent
+infoMarkerByLine <- function(pedInfo,fpDataVec,nCores,tmpFolder,genos = c("AA","TT","CC","GG")){
   if(!dir.exists(tmpFolder)){dir.create(tmpFolder)}
   numCores <- detectCores()
   if(nCores < numCores){
@@ -46,60 +52,57 @@ infoMarkerByLine <- function(df,fpDataVec,nCores,tmpFolder,genos = c("AA","TT","
     print(paste("Using",nCores,"Cores out of the computer's maximum of", numCores,"cores"))
   }
   
-  linesPerRun <- ceiling(nrow(df) / nCores)
+  linesPerRun <- ceiling(nrow(pedInfo) / nCores)
   
-  foreach(count = 1:nCores,.combine=rbind) %dopar% {
+  foreach(batchIndex = 1:nCores,.combine=rbind) %dopar% {
+    st <- (batchIndex-1) * linesPerRun + 1
+    ed <- min( batchIndex*linesPerRun,nrow(pedInfo))
     
-    st <- (count-1) * linesPerRun + 1
-    ed <- min(count*linesPerRun,nrow(df))
+    subPedInfo <- pedInfo[st:ed,]
     
-    subDf <- df[st:ed,]
-    
-    for(k in 1:nrow(subDf)){
-      qLine <- subDf$pedigree[k]
-      prts <- c(subDf$prt1[k],subDf$prt2[k])
+    for(k in 1:nrow(subPedInfo)){
+      qLine <- subPedInfo$pedigree[k]
+      prts <- c(subPedInfo$prt1[k],subPedInfo$prt2[k])
       if(all(c(qLine,prts) %in% colnames(fpDataVec))){
-        tmpData <- fpDataVec[,as.character(c(qLine,prts))]
-        colnames(tmpData) <- c("O","P1","P2")
+        outData <- fpDataVec[,as.character(c(qLine,prts))]
+        colnames(outData) <- c("O","P1","P2")
         
         # 1) skip if any missing data or heterozygous presents
-        tmpData <- tmpData %>% filter(O %in% genos,P1 %in% genos, P2 %in% genos,P1 != P2)
-        tmpData$markers = row.names(tmpData)
-        tmpData$parent <- ifelse(tmpData$O == tmpData$P1,1,2)
+        outData <- outData %>% 
+                        filter(O %in% genos,P1 %in% genos, P2 %in% genos,P1 != P2)
+        outData$markers = row.names(outData)
+        outData$parent = 0 # not matching any parent
+        outData[outData$O == outData$P1,"parent"] = 1
+        outData[outData$O == outData$P2,"parent"] = 2
+        outData = outData %>% filter(parent %in% c(1,2))
         
         # 2) skip if no data or only one parental genotype
-        if(nrow(tmpData) <= 1){next;}
-        if(length(unique(tmpData$parent)) == 1){next;}
+        if(nrow(outData) <= 1){next;}
+        if(length(unique(outData$parent)) == 1){next;}
         
-        write.csv(tmpData,paste0(tmpFolder,"/",qLine,".csv"),row.names=F)
+        write.csv(outData,paste0(tmpFolder,"/",qLine,".csv"),row.names=F)
       }
     }
   }
 }
 
-# get all markers that have recFraction data
-collectAllInfoMarkers <- function(tmpFolder){
-  # collect all infoMarkerByLine results
-  
-  allFiles = list.files(tmpFolder)
-  lineRes = data.frame(line=as.character(),p1Count = as.numeric(),p2Count = as.numeric())
 
-  for(fileName in allFiles){
-    tmpData = read.csv(paste0(tmpFolder,"/",fileName))
-    qLine = unlist(strsplit(fileName,"\\."))[1]
-    tmpData$line = qLine
-    lineRes = bind_rows(lineRes,data.frame(line = qLine,p1Count = table(tmpData$parent)[1],p2Count = table(tmpData$parent)[2]))
-  }
-  return(lineRes)
-}
+#### 2.2 recombination data for all trios; #total Trios and #recombined Trios
 
-# for any pair of markers, count #totalTros and #recombinedTrios
-# Output are two matrix, each one is a large matrix with the dimension as #markers x #markers (around 65k x 65k)
+#'  This function is to count #totalTros and #recombinedTrios for each pair of markers
+#'
+#' @param tmpFolder string a tmp folder from each trio; Informative markers and Parental Status;
+#' @param allMarkers vector<string> a list of all markers from the genetic map
+#' @param outFileFolder, string a folder to store all the output data
+#' @param verbose string whether or not to print information
+#' 
+#' @return null outputs are saved to outFileFolder;  Output are two matrix, each one is a large matrix with the dimension as #markers x #markers (around 65k x 65k)
 
 generateRecData = function(tmpFolder,allMarkers,outFileFolder,verbose = TRUE){
   # This function is to generate recbinate rate for any pair of markers
   # For every trio, collect the informative markers and found which pair of markers are recombined (saved at tmpFolder)
   # collect all infoMarkerByLine results, and then count recombined lines and non-recombined lines;
+  
   if(!dir.exists(outFileFolder)){dir.create(outFileFolder)}
   
   testResEffCount <- data.frame(matrix(0,nrow=length(allMarkers),ncol=length(allMarkers)))
@@ -147,10 +150,19 @@ generateRecData = function(tmpFolder,allMarkers,outFileFolder,verbose = TRUE){
 
 
 ### 3. define groups and determine anchors
-# find closely linked markers
-getLinkedMarkerInfo <- function(phyPos,testMarkers, testTrioCount, totalRecRate,minCount, maxRecRate){
-  # For each marker, find other markers that linked with this marker and summarize the linkage information;
-  # return summarized information
+
+#'  This function is to find closely linked markers based on maxRecRate; This could tell if a marker is off chr/pos (bwteen genetic and phyical pos)
+#'
+#' @param phyPos data.frame a table format that lists the physical positon of each marker; Includes at least three columns Q_ID/markerName, chr, Sbegin/pos
+#' @param testMarkers vector<string> a list of markers
+#' @param totalTrioCount data.frame a table format that includes all the trios for each pair of marker (row and column)
+#' @param totalRecCount data.frame a table format that includes all the recombined trios for each pair of marker (row and column)
+#' @param minCount integer the minimum number of trio required
+#' @param maxRecRate numeric the maximum recombination rate required
+#' 
+#' @return data.frame to includes all the information for each marker. For each marker, find other markers that linked with this marker and summarize the linkage information;
+
+getLinkedMarkerInfo <- function(phyPos,testMarkers, totalTrioCount, totalRecCount,minCount, maxRecRate){
   
   res <- phyPos %>% filter(Q_ID %in% testMarkers) %>% select(Q_ID, chr, Sbegin)
   row.names(res) = res$Q_ID
@@ -162,8 +174,8 @@ getLinkedMarkerInfo <- function(phyPos,testMarkers, testTrioCount, totalRecRate,
   res$LDMarkers <- NA
   
   for(pos in 1:nrow(res)){
-    tmp <- data.frame(chr = res$chr,pos = res$Sbegin,totalCount = testTrioCount[testMarkers,res$Q_ID[pos]],
-                      recRate = totalRecRate[testMarkers,res$Q_ID[pos]]) 
+    tmp <- data.frame(chr = res$chr,pos = res$Sbegin,totalCount = totalTrioCount[testMarkers,res$Q_ID[pos]],
+                      recRate = totalRecCount[testMarkers,res$Q_ID[pos]]) 
     tmp$marker = testMarkers
     tmp <- tmp %>% filter(totalCount >= minCount, recRate <=  maxRecRate)
     tableTmp <- table(tmp$chr) 
@@ -183,25 +195,18 @@ getLinkedMarkerInfo <- function(phyPos,testMarkers, testTrioCount, totalRecRate,
   return(res)
 }
 
-# find the offPos markers
-findOffPosMk = function(chrMapDist,minCM=0.2,maxDist = 150){
-  # offPosMk: markers that are tightly linked with other markers that are farther way and/or 
-  # markers that have no closely linked markers
-  N = nrow(chrMapDist)
-  pbMks = data.frame(mkName = row.names(chrMapDist), maxDistMk = rep(NA,N), pbMks = rep("F",N))
-  
-  for(i in 1:N){
-    posIndex = which(as.numeric(chrMapDist[i,]) <= minCM)
-    if(length(posIndex) < 1){
-      pbMks[i,3] = "T"
-    }else{
-      pbMks[i,2] = max(abs(posIndex - i))
-      if(max(abs(posIndex - i)) >= maxDist){
-        pbMks[i,3] = "T"
-      }
-    }
+findLinkedGroups = function(initialIndex,pwDist = subPwGroupSm,minMapDist = 5,minMapDistEdge = 1){
+  if(initialIndex == 1){
+    rightSel = findLinkedGroupFromRight(initialIndex, pwDist,minMapDist,minMapDistEdge)
+    return(list(distVec=rightSel$distVec, selIndex = c(initialIndex,rightSel$selIndex)))
+  }else if(initialIndex == nrow(pwDist)){
+    leftSel = findLinkedGroupFromLeft(initialIndex, pwDist,minMapDist,minMapDistEdge)
+    return(list(distVec=leftSel$distVec, selIndex = leftSel$selIndex))
+  }else{
+    rightSel = findLinkedGroupFromRight(initialIndex, pwDist,minMapDist,minMapDistEdge)
+    leftSel = findLinkedGroupFromLeft(initialIndex, pwDist,minMapDist,minMapDistEdge)
+    return(list(distVec=c(leftSel$distVec,rightSel$distVec), selIndex = c(leftSel$selIndex,rightSel$selIndex)))
   }
-  return(pbMks)
 }
 
 findLinkedGroupFromRight = function(initialIndex,pwDist = subPwGroupSm,minMapDist,minMapDistEdge){
@@ -265,19 +270,6 @@ findLinkedGroupFromLeft = function(initialIndex,pwDist = subPwGroupSm,minMapDist
   
 }
 
-findLinkedGroups = function(initialIndex,pwDist = subPwGroupSm,minMapDist = 5,minMapDistEdge = 1){
-  if(initialIndex == 1){
-    rightSel = findLinkedGroupFromRight(initialIndex, pwDist,minMapDist,minMapDistEdge)
-    return(list(distVec=rightSel$distVec, selIndex = c(initialIndex,rightSel$selIndex)))
-  }else if(initialIndex == nrow(pwDist)){
-    leftSel = findLinkedGroupFromLeft(initialIndex, pwDist,minMapDist,minMapDistEdge)
-    return(list(distVec=leftSel$distVec, selIndex = leftSel$selIndex))
-  }else{
-    rightSel = findLinkedGroupFromRight(initialIndex, pwDist,minMapDist,minMapDistEdge)
-    leftSel = findLinkedGroupFromLeft(initialIndex, pwDist,minMapDist,minMapDistEdge)
-    return(list(distVec=c(leftSel$distVec,rightSel$distVec), selIndex = c(leftSel$selIndex,rightSel$selIndex)))
-  }
-}
 
 getGroupAnchorDiff <- function(anchors, pwDist = subPwGroupSm){
   # this function is to evaluate anchors based on MAE; 
@@ -628,4 +620,40 @@ getPwKsbDist = function(testData,testTrioCount, totalRecRate,minCount = 100){
 }
 
 
+### 6. others
+# find the offPos markers
+findOffPosMk = function(chrMapDist,minCM=0.2,maxDist = 150){
+  # offPosMk: markers that are tightly linked with other markers that are farther way and/or 
+  # markers that have no closely linked markers
+  N = nrow(chrMapDist)
+  pbMks = data.frame(mkName = row.names(chrMapDist), maxDistMk = rep(NA,N), pbMks = rep("F",N))
+  
+  for(i in 1:N){
+    posIndex = which(as.numeric(chrMapDist[i,]) <= minCM)
+    if(length(posIndex) < 1){
+      pbMks[i,3] = "T"
+    }else{
+      pbMks[i,2] = max(abs(posIndex - i))
+      if(max(abs(posIndex - i)) >= maxDist){
+        pbMks[i,3] = "T"
+      }
+    }
+  }
+  return(pbMks)
+}
 
+#  This function is to get all markers that have recFraction data
+collectAllInfoMarkers <- function(tmpFolder){
+  # collect all infoMarkerByLine results
+  
+  allFiles = list.files(tmpFolder)
+  lineRes = data.frame(line=as.character(),p1Count = as.numeric(),p2Count = as.numeric())
+
+  for(fileName in allFiles){
+    tmpData = read.csv(paste0(tmpFolder,"/",fileName))
+    qLine = unlist(strsplit(fileName,"\\."))[1]
+    tmpData$line = qLine
+    lineRes = bind_rows(lineRes,data.frame(line = qLine,p1Count = table(tmpData$parent)[1],p2Count = table(tmpData$parent)[2]))
+  }
+  return(lineRes)
+}
