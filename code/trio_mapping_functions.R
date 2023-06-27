@@ -105,13 +105,13 @@ generateRecData = function(tmpFolder,allMarkers,outFileFolder,verbose = TRUE){
   
   if(!dir.exists(outFileFolder)){dir.create(outFileFolder)}
   
-  testResEffCount <- data.frame(matrix(0,nrow=length(allMarkers),ncol=length(allMarkers)))
-  row.names(testResEffCount) <- allMarkers
-  colnames(testResEffCount) <- allMarkers
+  totalTrioCount <- data.frame(matrix(0,nrow=length(allMarkers),ncol=length(allMarkers)))
+  row.names(totalTrioCount) <- allMarkers
+  colnames(totalTrioCount) <- allMarkers
   
-  testResRecCount <- data.frame(matrix(0,nrow=length(allMarkers),ncol=length(allMarkers)))
-  row.names(testResRecCount) <- allMarkers
-  colnames(testResRecCount) <- allMarkers
+  recTrioCount <- data.frame(matrix(0,nrow=length(allMarkers),ncol=length(allMarkers)))
+  row.names(recTrioCount) <- allMarkers
+  colnames(recTrioCount) <- allMarkers
   
   allFiles = list.files(tmpFolder)
   testedMarkers= as.character()
@@ -127,23 +127,23 @@ generateRecData = function(tmpFolder,allMarkers,outFileFolder,verbose = TRUE){
     
     tmpDataMarkers = tmpData$markers
     
-    testResEffCount[tmpDataMarkers,tmpDataMarkers] <- testResEffCount[tmpDataMarkers,tmpDataMarkers] + 1 # sum recombined and none-recombined trios
+    totalTrioCount[tmpDataMarkers,tmpDataMarkers] <- totalTrioCount[tmpDataMarkers,tmpDataMarkers] + 1 # sum recombined and none-recombined trios
     
     p1Index <- which(tmpData$parent == 1)
     p2Index <- which(tmpData$parent == 2)
     
     # recombination happened between markers having different parent
-    testResRecCount[tmpDataMarkers[p1Index],tmpDataMarkers[p2Index]] <- testResRecCount[tmpDataMarkers[p1Index],tmpDataMarkers[p2Index]] + 1 # only recombined trios
-    testResRecCount[tmpDataMarkers[p2Index],tmpDataMarkers[p1Index]] <- testResRecCount[tmpDataMarkers[p2Index],tmpDataMarkers[p1Index]] + 1 # only recombined trios
+    recTrioCount[tmpDataMarkers[p1Index],tmpDataMarkers[p2Index]] <- recTrioCount[tmpDataMarkers[p1Index],tmpDataMarkers[p2Index]] + 1 # only recombined trios
+    recTrioCount[tmpDataMarkers[p2Index],tmpDataMarkers[p1Index]] <- recTrioCount[tmpDataMarkers[p2Index],tmpDataMarkers[p1Index]] + 1 # only recombined trios
   }
   
-  testResRecCount = testResRecCount[testedMarkers,testedMarkers]
-  testResEffCount = testResEffCount[testedMarkers,testedMarkers]
+  recTrioCount = recTrioCount[testedMarkers,testedMarkers]
+  totalTrioCount = totalTrioCount[testedMarkers,testedMarkers]
   
   cat(paste("... Saving Data ....;", "\n",Sys.time()))
-  saveRDS(testResEffCount,paste0(outFileFolder,"/totalTrioCount_allChr.rds"))
-  saveRDS(testResRecCount,paste0(outFileFolder,"/recTrioCount_allChr.rds"))
-  testRecRate <- round(testResRecCount/testResEffCount,4) # recombination rate for each markers (#recTrios / #totalTrios)
+  saveRDS(totalTrioCount,paste0(outFileFolder,"/totalTrioCount_allChr.rds"))
+  saveRDS(recTrioCount,paste0(outFileFolder,"/recTrioCount_allChr.rds"))
+  testRecRate <- round(recTrioCount/totalTrioCount,4) # recombination rate for each markers (#recTrios / #totalTrios)
   saveRDS(testRecRate,paste0(outFileFolder,"/recRate_allChr.rds"))
   cat(paste("... Rec Data Done!!! ....;", "\n",Sys.time()))
 }
@@ -156,15 +156,15 @@ generateRecData = function(tmpFolder,allMarkers,outFileFolder,verbose = TRUE){
 #' @param phyPos data.frame a table format that lists the physical positon of each marker; Includes at least three columns Q_ID/markerName, chr, Sbegin/pos
 #' @param testMarkers vector<string> a list of markers
 #' @param totalTrioCount data.frame a table format that includes all the trios for each pair of marker (row and column)
-#' @param totalRecCount data.frame a table format that includes all the recombined trios for each pair of marker (row and column)
+#' @param totalRecRate data.frame a table format that includes all the recombination rate for each pair of marker (row and column)
 #' @param minCount integer the minimum number of trio required
 #' @param maxRecRate numeric the maximum recombination rate required
 #' 
 #' @return data.frame to includes all the information for each marker. For each marker, find other markers that linked with this marker and summarize the linkage information;
 
-getLinkedMarkerInfo <- function(phyPos,testMarkers, totalTrioCount, totalRecCount,minCount, maxRecRate){
+getLinkedMarkerInfo <- function(phyPos,testMarkers, totalTrioCount, totalRecRate,minCount, maxRecRate){
   
-  res <- phyPos %>% filter(Q_ID %in% testMarkers) %>% select(Q_ID, chr, Sbegin)
+  res <- phyPos %>% filter(Q_ID %in% testMarkers) %>% dplyr::select(Q_ID, chr, Sbegin)
   row.names(res) = res$Q_ID
   res = res[testMarkers,]
   res$chrDist <- NA
@@ -173,19 +173,19 @@ getLinkedMarkerInfo <- function(phyPos,testMarkers, totalTrioCount, totalRecCoun
   res$totalMkLinked <- NA
   res$LDMarkers <- NA
   
-  for(pos in 1:nrow(res)){
-    tmp <- data.frame(chr = res$chr,pos = res$Sbegin,totalCount = totalTrioCount[testMarkers,res$Q_ID[pos]],
-                      recRate = totalRecCount[testMarkers,res$Q_ID[pos]]) 
+  for(rowIndex in 1:nrow(res)){
+    tmp <- data.frame(chr = res$chr,totalCount = totalTrioCount[testMarkers,res$Q_ID[rowIndex]],
+                      recRate = totalRecRate[testMarkers,res$Q_ID[rowIndex]]) 
     tmp$marker = testMarkers
     tmp <- tmp %>% filter(totalCount >= minCount, recRate <=  maxRecRate)
     tableTmp <- table(tmp$chr) 
     chrDist <- paste(names(tableTmp),collapse =";")
     chrNum <- paste(tableTmp,collapse =";")
-    res$chrDist[pos] <- chrDist
-    res$numPerChr[pos] <- chrNum
-    res$totalMkLinkedOwnChr[pos] = tableTmp[as.character(res$chr[pos])]
-    res$totalMkLinked[pos] = sum(tableTmp)
-    res$LDMarkers[pos] = paste(tmp$marker,collapse =";")
+    res$chrDist[rowIndex] <- chrDist
+    res$numPerChr[rowIndex] <- chrNum
+    res$totalMkLinkedOwnChr[rowIndex] = tableTmp[as.character(res$chr[rowIndex])]
+    res$totalMkLinked[rowIndex] = sum(tableTmp)
+    res$LDMarkers[rowIndex] = paste(tmp$marker,collapse =";")
     
   }
   
@@ -195,129 +195,29 @@ getLinkedMarkerInfo <- function(phyPos,testMarkers, totalTrioCount, totalRecCoun
   return(res)
 }
 
-findLinkedGroups = function(initialIndex,pwDist = subPwGroupSm,minMapDist = 5,minMapDistEdge = 1){
-  if(initialIndex == 1){
-    rightSel = findLinkedGroupFromRight(initialIndex, pwDist,minMapDist,minMapDistEdge)
-    return(list(distVec=rightSel$distVec, selIndex = c(initialIndex,rightSel$selIndex)))
-  }else if(initialIndex == nrow(pwDist)){
-    leftSel = findLinkedGroupFromLeft(initialIndex, pwDist,minMapDist,minMapDistEdge)
-    return(list(distVec=leftSel$distVec, selIndex = leftSel$selIndex))
-  }else{
-    rightSel = findLinkedGroupFromRight(initialIndex, pwDist,minMapDist,minMapDistEdge)
-    leftSel = findLinkedGroupFromLeft(initialIndex, pwDist,minMapDist,minMapDistEdge)
-    return(list(distVec=c(leftSel$distVec,rightSel$distVec), selIndex = c(leftSel$selIndex,rightSel$selIndex)))
-  }
-}
 
-findLinkedGroupFromRight = function(initialIndex,pwDist = subPwGroupSm,minMapDist,minMapDistEdge){
-  # 
-  if(initialIndex >= nrow(pwDist) | initialIndex <= 0){
-    print("Error!! Wrong initial index")
-    stop()
-  }
-  distVec = as.numeric()
-  selGroupIndex = as.numeric()
-  stIndex = initialIndex
-  
-  while(stIndex < nrow(pwDist)){
-    qIndex = stIndex:nrow(pwDist)
-    sIndex = which(pwDist[stIndex,qIndex] >= minMapDist)
-    if(length(sIndex) < 1){
-      if(max(pwDist[stIndex, qIndex],na.rm=T) >= minMapDistEdge){# require at least 1 cM length
-        distVec = c(distVec,max(pwDist[stIndex, qIndex],na.rm=T))
-        selGroupIndex = c(selGroupIndex,qIndex[which.max(pwDist[stIndex, qIndex])])
-      } 
-      stIndex = nrow(pwDist)
-    }else{
-      tmpIndex = min(sIndex)
-      tmpIndex = qIndex[tmpIndex]
-      selGroupIndex = c(selGroupIndex,tmpIndex)
-      distVec = c(distVec,pwDist[stIndex, tmpIndex])
-      stIndex = tmpIndex
-    }
-  }
-  return(list(distVec = distVec,selIndex = selGroupIndex))
-  
-}
+#'  This function is to find anchor to each chr; All tmporary data are saved at tmpOutFolder
+#'
+#' @param testChr integer the query chr
+#' @param mkLinkageInfo data.frame a table format that includes marker linkage information
+#' @param totalTrioCount data.frame a table format that includes all the trios for each pair of marker (row and column)
+#' @param totalRecRate data.frame a table format that includes all the recombination rate for each pair of marker (row and column)
+#' @param tmpOutFolder string a tmp folder to save the output
+#' @param minCount integer the minimum number of trio required
+#' @param minLinkedMk integer the minimum number of linked markers
+#' @param mkPerGroup integer the required number of markers per group
+#' @param minDataPoint integer the minimum number of data point per group
+#' @param minDataPointPerMk integer the minimum number of data point per marker
+#' @param maxDist numeric the maximum distance
+#' @param numOfDataBwGroups integer the minimum number of data between two groups
 
-findLinkedGroupFromLeft = function(initialIndex,pwDist = subPwGroupSm,minMapDist,minMapDistEdge){
-  # 
-  if(initialIndex > nrow(pwDist) | initialIndex <= 1){
-    print("Error!! Wrong initial index")
-    stop()
-  }
-  distVec = as.numeric()
-  selGroupIndex = stIndex = initialIndex
-  while(stIndex > 1 ){
-    qIndex = 1: stIndex
-    sIndex = which(pwDist[stIndex,qIndex] >= minMapDist)
-    if(length(sIndex) < 1){
-      if(max(pwDist[stIndex, qIndex],na.rm = T) >= minMapDistEdge){ # request at least 1cM distance
-        distVec = c(distVec,max(pwDist[stIndex, qIndex],na.rm = T))
-        selGroupIndex = c(selGroupIndex,qIndex[which.max(pwDist[stIndex, qIndex])])
-      }
-      
-      stIndex = 1
-    }else{
-      tmpIndex = max(sIndex)
-      tmpIndex = qIndex[tmpIndex]
-      selGroupIndex = c(selGroupIndex,tmpIndex)
-      distVec = c(distVec,pwDist[stIndex, tmpIndex])
-      stIndex = tmpIndex
-    }
-  }
-  return(list(distVec = rev(distVec),selIndex = rev(selGroupIndex)))
-  
-}
+#' 
+#' @return null
 
-
-getGroupAnchorDiff <- function(anchors, pwDist = subPwGroupSm){
-  # this function is to evaluate anchors based on MAE; 
-  # For any pair of anchor, MAE is calculated from groups from their left (after last anchor), middle and right (before last anchor)
-  # anchors is a output from the function of "findLinkedGroups"
-  # its a list with two components: distVec and selIndex; 
-  distVec = anchors$distVec
-  selIndex = anchors$selIndex
-  
-  res = data.frame(totalLeft = rep(NA,length(selIndex)-1), numLeft = rep(NA,length(selIndex)-1),
-                   totalMid = rep(NA,length(selIndex)-1), numMid = rep(NA,length(selIndex)-1),
-                   totalRight = rep(NA,length(selIndex)-1), numRight = rep(NA,length(selIndex)-1))
-  
-  for(i in 1:(length(selIndex) - 1)){
-    a1 = selIndex[i]
-    a2 = selIndex[i+1]
-    leftIndex ='if'(i > 1, (selIndex[i-1]+1):(a1-1),1:(a1-1))
-    rightIndex = 'if'(i < length(selIndex) - 1, (a2+1):(selIndex[i+2]-1), (a2+1):ncol(pwDist))
-    midIndex = (a1 + 1) : (a2 - 1)
-    
-    # diff from left
-    if(!(length(leftIndex) == 2 & leftIndex[2] < leftIndex[1])){
-      tmp = abs(pwDist[a2,leftIndex] - pwDist[a1,leftIndex] - rep(distVec[i],length(leftIndex)))
-      res[i,1:2] = c(sum(tmp,na.rm = T),length(which(!is.na(tmp))))
-    }
-    
-    # diff from middle 
-    if(!(length(midIndex) == 2 & midIndex[2] < midIndex[1])){
-      tmp = abs(pwDist[a2,midIndex] + pwDist[a1,midIndex] - rep(distVec[i],length(midIndex)))
-      res[i,3:4] = c(sum(tmp,na.rm = T),length(which(!is.na(tmp))))
-    }
-    
-    # diff from right
-    if(!(length(rightIndex) == 2 & rightIndex[2] < rightIndex[1])){
-      tmp = abs(pwDist[a1,rightIndex] - pwDist[a2,rightIndex] - rep(distVec[i],length(rightIndex)))
-      res[i,5:6] =  c(sum(tmp,na.rm = T),length(which(!is.na(tmp))))
-    }
-    
-  }
-  
-  return(res)
-  
-}
-
-findAnchorsByChr = function(testChr, res_2, totalTrioCount, totalRecRate,tmpOutFolder,minCount = 200,minLinkedMk = 5,
+findAnchorsByChr = function(testChr, mkLinkageInfo, totalTrioCount, totalRecRate,tmpOutFolder,minCount = 200,minLinkedMk = 5,
                             mkPerGroup = 10,minDataPoint = 80, minDataPointPerMk = 5, maxDist = 0.5,numOfDataBwGroups = 20) {
   if(!dir.exists(tmpOutFolder)){dir.create(tmpOutFolder)}
-  testChrData = res_2 %>% filter(chr == testChr, chrDist == testChr, totalMkLinkedOwnChr >= minLinkedMk) %>% arrange(Sbegin)
+  testChrData = rmkLinkageInfo %>% filter(chr == testChr, chrDist == testChr, totalMkLinkedOwnChr >= minLinkedMk) %>% arrange(Sbegin)
   testChrMk = testChrData$Q_ID
   chrRecCount = totalTrioCount[testChrMk,testChrMk]
   chrRecRate = totalRecRate[testChrMk,testChrMk]
@@ -427,7 +327,219 @@ findAnchorsByChr = function(testChr, res_2, totalTrioCount, totalRecRate,tmpOutF
 }
 
 
+#'  This function is to find informative markers for each trio and then return its matching status with parents: P1 or P2
+#'
+#' @param chrMapDist data.frame pairwise distance
+#' @param minDist numeric the minimum distance 
+#' @param maxDist numeric the maximum distance
+#' 
+#' @return data.frame a table format; 
+
+getNeigboringGroups = function(chrMapDist,minDist, maxDist){
+  
+  tmpRes = data.frame(mk = 1:ncol(chrMapDist),lMks=NA,rMks=NA)
+ 
+  for(i in 1:ncol(chrMapDist)){
+    tmpDist = chrMapDist[,i]
+    mkIndex = which(tmpDist >= minDist & tmpDist <= maxDist)
+    rightIndex = mkIndex[which(mkIndex > i)]
+    leftIndex = mkIndex[which(mkIndex < i)]
+    if(length(leftIndex) > 0){
+      tmpRes$lMks[i] = paste(leftIndex,collapse = "_")
+    }
+    
+    if(length(rightIndex) > 0){
+      tmpRes$rMks[i] = paste(rightIndex,collapse = "_")
+    }
+    
+  }
+  return(tmpRes)
+}
+
+
+#'  This function is to calcuate Pairwise marker MAE; using the markers between any given pairs to calculate MAE
+#'
+#' @param chrMapDist data.frame pairwise distance
+#' @return data.frame a table format; 
+
+getPwMkMAE = function(chrMapDist){
+  tmpRes = matrix(NA,nrow=nrow(chrMapDist),ncol=ncol(chrMapDist),dimnames = list(colnames(chrMapDist),colnames(chrMapDist)))
+  for(i in 1:(ncol(chrMapDist)-2)){
+    for(j in (i+2) : ncol(chrMapDist)){
+      if(is.na(chrMapDist[i,j])){next;}
+      tmp = chrMapDist[i:j,c(i,j)]
+      rowSum = rowSums(tmp)
+      rowSum = rowSum[which(!is.na(rowSum))]
+      if(length(rowSum) > 2) {# having at least 1 extra value
+        tmpRes[i,j] = tmpRes[j,i] = round(mean(abs(rowSum - rowSum[1])[2:(length(rowSum)-1)]),2)   
+      }
+    }
+  }
+  return(tmpRes)
+}
+
+
+#'  This function is to find closely linked anchors from both left and right; Anchor path
+#'
+#' @param initialIndex integer the query index
+#' @param pwDist data.frame the pairsie group similary data
+#' @param minMapDist integer the minimum distance between two anchors/groups
+#' @param minMapDistEdge integer the minimum distance between two anchors/groups at the end of a chromosome
+#' 
+#' @return list
+
+findLinkedGroups = function(initialIndex,pwDist = subPwGroupSm,minMapDist = 5,minMapDistEdge = 1){
+  if(initialIndex == 1){
+    rightSel = findLinkedGroupFromRight(initialIndex, pwDist,minMapDist,minMapDistEdge)
+    return(list(distVec=rightSel$distVec, selIndex = c(initialIndex,rightSel$selIndex)))
+  }else if(initialIndex == nrow(pwDist)){
+    leftSel = findLinkedGroupFromLeft(initialIndex, pwDist,minMapDist,minMapDistEdge)
+    return(list(distVec=leftSel$distVec, selIndex = leftSel$selIndex))
+  }else{
+    rightSel = findLinkedGroupFromRight(initialIndex, pwDist,minMapDist,minMapDistEdge)
+    leftSel = findLinkedGroupFromLeft(initialIndex, pwDist,minMapDist,minMapDistEdge)
+    return(list(distVec=c(leftSel$distVec,rightSel$distVec), selIndex = c(leftSel$selIndex,rightSel$selIndex)))
+  }
+}
+
+#'  This function is to find closely linked anchors from right; Anchor path
+#'
+#' @param initialIndex integer the query index
+#' @param pwDist data.frame the pairsie group similary data
+#' @param minMapDist integer the minimum distance between two anchors/groups
+#' @param minMapDistEdge integer the minimum distance between two anchors/groups at the end of a chromosome
+#' 
+#' @return list
+
+findLinkedGroupFromRight = function(initialIndex,pwDist = subPwGroupSm,minMapDist,minMapDistEdge){
+  # 
+  if(initialIndex >= nrow(pwDist) | initialIndex <= 0){
+    print("Error!! Wrong initial index")
+    stop()
+  }
+  distVec = as.numeric()
+  selGroupIndex = as.numeric()
+  stIndex = initialIndex
+  
+  while(stIndex < nrow(pwDist)){
+    qIndex = stIndex:nrow(pwDist)
+    sIndex = which(pwDist[stIndex,qIndex] >= minMapDist)
+    if(length(sIndex) < 1){
+      if(max(pwDist[stIndex, qIndex],na.rm=T) >= minMapDistEdge){# require at least 1 cM length
+        distVec = c(distVec,max(pwDist[stIndex, qIndex],na.rm=T))
+        selGroupIndex = c(selGroupIndex,qIndex[which.max(pwDist[stIndex, qIndex])])
+      } 
+      stIndex = nrow(pwDist)
+    }else{
+      tmpIndex = min(sIndex)
+      tmpIndex = qIndex[tmpIndex]
+      selGroupIndex = c(selGroupIndex,tmpIndex)
+      distVec = c(distVec,pwDist[stIndex, tmpIndex])
+      stIndex = tmpIndex
+    }
+  }
+  return(list(distVec = distVec,selIndex = selGroupIndex))
+  
+}
+
+#'  This function is to find closely linked anchors from left; Anchor path
+#'
+#' @param initialIndex integer the query index
+#' @param pwDist data.frame the pairsie group similary data
+#' @param minMapDist integer the minimum distance between two anchors/groups
+#' @param minMapDistEdge integer the minimum distance between two anchors/groups at the end of a chromosome
+#' 
+#' @return list
+findLinkedGroupFromLeft = function(initialIndex,pwDist = subPwGroupSm,minMapDist,minMapDistEdge){
+  # 
+  if(initialIndex > nrow(pwDist) | initialIndex <= 1){
+    print("Error!! Wrong initial index")
+    stop()
+  }
+  distVec = as.numeric()
+  selGroupIndex = stIndex = initialIndex
+  while(stIndex > 1 ){
+    qIndex = 1: stIndex
+    sIndex = which(pwDist[stIndex,qIndex] >= minMapDist)
+    if(length(sIndex) < 1){
+      if(max(pwDist[stIndex, qIndex],na.rm = T) >= minMapDistEdge){ # request at least 1cM distance
+        distVec = c(distVec,max(pwDist[stIndex, qIndex],na.rm = T))
+        selGroupIndex = c(selGroupIndex,qIndex[which.max(pwDist[stIndex, qIndex])])
+      }
+      
+      stIndex = 1
+    }else{
+      tmpIndex = max(sIndex)
+      tmpIndex = qIndex[tmpIndex]
+      selGroupIndex = c(selGroupIndex,tmpIndex)
+      distVec = c(distVec,pwDist[stIndex, tmpIndex])
+      stIndex = tmpIndex
+    }
+  }
+  return(list(distVec = rev(distVec),selIndex = rev(selGroupIndex)))
+  
+}
+
+#'  This function is to evaluate anchors based on MAE; For any pair of anchor, MAE is calculated from groups from their left (after last anchor), middle and right (before last anchor)
+
+#'
+#' @param anchors list a output from the function of "findLinkedGroups", with two components: distVec and selIndex; 
+#' @param pwDist data.frame the pairsie group similary data
+#' 
+#' @return data.frame
+
+getGroupAnchorDiff <- function(anchors, pwDist = subPwGroupSm){
+  distVec = anchors$distVec
+  selIndex = anchors$selIndex
+  
+  res = data.frame(totalLeft = rep(NA,length(selIndex)-1), numLeft = rep(NA,length(selIndex)-1),
+                   totalMid = rep(NA,length(selIndex)-1), numMid = rep(NA,length(selIndex)-1),
+                   totalRight = rep(NA,length(selIndex)-1), numRight = rep(NA,length(selIndex)-1))
+  
+  for(i in 1:(length(selIndex) - 1)){
+    a1 = selIndex[i]
+    a2 = selIndex[i+1]
+    leftIndex ='if'(i > 1, (selIndex[i-1]+1):(a1-1),1:(a1-1))
+    rightIndex = 'if'(i < length(selIndex) - 1, (a2+1):(selIndex[i+2]-1), (a2+1):ncol(pwDist))
+    midIndex = (a1 + 1) : (a2 - 1)
+    
+    # diff from left
+    if(!(length(leftIndex) == 2 & leftIndex[2] < leftIndex[1])){
+      tmp = abs(pwDist[a2,leftIndex] - pwDist[a1,leftIndex] - rep(distVec[i],length(leftIndex)))
+      res[i,1:2] = c(sum(tmp,na.rm = T),length(which(!is.na(tmp))))
+    }
+    
+    # diff from middle 
+    if(!(length(midIndex) == 2 & midIndex[2] < midIndex[1])){
+      tmp = abs(pwDist[a2,midIndex] + pwDist[a1,midIndex] - rep(distVec[i],length(midIndex)))
+      res[i,3:4] = c(sum(tmp,na.rm = T),length(which(!is.na(tmp))))
+    }
+    
+    # diff from right
+    if(!(length(rightIndex) == 2 & rightIndex[2] < rightIndex[1])){
+      tmp = abs(pwDist[a1,rightIndex] - pwDist[a2,rightIndex] - rep(distVec[i],length(rightIndex)))
+      res[i,5:6] =  c(sum(tmp,na.rm = T),length(which(!is.na(tmp))))
+    }
+    
+  }
+  
+  return(res)
+  
+}
+
+
+
+
 ### 4. anchor distances and marker positions
+
+#'  This function is to coonect all anchors from a given anchor
+#'
+#' @param goodAnchors data.frame selected anchors that are in good quality in terms of data point, maxDistance, etc
+#' @param selAnchorPath string the path for a select anchor 
+#' @param anchorRes data.frame a table format including anchor information starting from a given anchor
+#' @param pwGroupSm data.frame the pairsie group similary data
+#' 
+#' @return vector<string> the distance between groups in the given anchor path
 
 goodAnchorDist = function(goodAnchors,selAnchorPath,anchorRes,pwGroupSm){
   # Starting from the selected anchor path, map all the other anchors to the map
@@ -472,6 +584,15 @@ goodAnchorDist = function(goodAnchors,selAnchorPath,anchorRes,pwGroupSm){
   return(allGroupDist)
 }
 
+
+#'  This function is to interpolate position
+#'
+#' @param x vector<numeric>  a numeric vector with no missing values (e.g. physical positions on a chr)
+#' @param y vector<numeric> a numeric vector the same length as x (e.g. genetic positions on a chr)
+#' @param tol numeric a defalut value
+#' 
+#' @return data.frame with interpolated values
+
 interpolate <- function(x, y, tol=1e-5) {
   #x is a numeric vector with no missing values (e.g. physical positions on a chr)
   #y is a numeric vector the same length as x (e.g. genetic positions on a chr)
@@ -499,6 +620,13 @@ interpolate <- function(x, y, tol=1e-5) {
   out <- cbind(x=xsorted,y.in=ysorted,y.out=yout)
   out
 }
+
+#'  This function is to interpolate marker positions based on goodAnchors' position
+#'
+#' @param subChrData data.frame
+#' @param goodAnchors data.frame selected anchors that are in good quality in terms of data point, maxDistance, etc
+#' 
+#' @return data.frame
 
 getMarkerPos = function(subChrData,goodAnchors){
   # interpolate marker positions based on goodAnchors' position
@@ -551,6 +679,17 @@ getMarkerPos = function(subChrData,goodAnchors){
   }
   return(subChrData)
 }
+
+
+#'  This function is to calculate marker distance
+#'
+#' @param goodAnchors data.frame selected anchors that are in good quality in terms of data point, maxDistance, etc.
+#' @param index integer
+#' @param chrMapDist data.frame pairwise distance
+#' @param newMarkerRes data.frame marker information with genetic map information
+#' @param minDataWithAnchor integer minimum data for a given anchor
+#' 
+#' @return data.frame
 
 reCalMkDist = function(goodAnchors,index,chrMapDist,newMarkerRes,minDataWithAnchor = 3){
   # for the adjacent anchors with big gaps,instead of interpolate by linear, recalculate the marker distance; 
@@ -605,11 +744,20 @@ reCalMkDist = function(goodAnchors,index,chrMapDist,newMarkerRes,minDataWithAnch
 
 ### 5. pair-wise marker kosambi distances
 
-getPwKsbDist = function(testData,testTrioCount, totalRecRate,minCount = 100){
+#'  This function is to calculate pairwise kosambi distance for the trio data
+#'
+#' @param testData data.frame having at least one column named "Q_ID"
+#' @param totalTrioCount data.frame a table format that includes all the trios for each pair of marker (row and column)
+#' @param totalRecRate data.frame a table format that includes all the recombination rate for each pair of marker (row and column)
+#' @param minCount integer minimum trio data required to calculate kosambi distance
+#'
+#' @return data.frame
+
+getPwKsbDist = function(testData,totalTrioCount, totalRecRate,minCount = 100){
   testMarkers  = testData$Q_ID
-  testMarkers = testMarkers[testMarkers %in% colnames(testTrioCount)]
+  testMarkers = testMarkers[testMarkers %in% colnames(totalTrioCount)]
   subRecRate = totalRecRate[testMarkers,testMarkers]
-  subTotalCount = testTrioCount[testMarkers,testMarkers]
+  subTotalCount = totalTrioCount[testMarkers,testMarkers]
   subTotalCount = ifelse(subTotalCount >= minCount,1,NA)
   subRecRate = as.matrix(subRecRate * subTotalCount)
   subRecRate = ifelse(subRecRate >= 0.5,0.49,subRecRate)
@@ -621,7 +769,15 @@ getPwKsbDist = function(testData,testTrioCount, totalRecRate,minCount = 100){
 
 
 ### 6. others
-# find the offPos markers
+
+#'  This function is to find the offPos markers
+#'
+#' @param chrMapDist data.frame pairwise distance
+#' @param minCM numeric minimum genetic distance
+#' @param maxDist numeirc maximum genetic distance
+#'
+#' @return data.frame
+
 findOffPosMk = function(chrMapDist,minCM=0.2,maxDist = 150){
   # offPosMk: markers that are tightly linked with other markers that are farther way and/or 
   # markers that have no closely linked markers
@@ -642,7 +798,12 @@ findOffPosMk = function(chrMapDist,minCM=0.2,maxDist = 150){
   return(pbMks)
 }
 
-#  This function is to get all markers that have recFraction data
+#'  This function is to get all markers that have recFraction data
+#'
+#' @param tmpFolder string the path that stores all the tmp data for each trio
+#'
+#' @return data.frame
+
 collectAllInfoMarkers <- function(tmpFolder){
   # collect all infoMarkerByLine results
   
