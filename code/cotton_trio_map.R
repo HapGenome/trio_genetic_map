@@ -391,7 +391,7 @@ markerMapRes[testData$Q_ID,"newMapPos"] = interpolate(testData$Sbegin,testData$n
  
 # another 9 markers without physicla position. 
 subMarkerMap = markerMapRes %>% 
-  filter(oldMapChr == testChr) %>% 
+  filter(oldMapChr == testChr, is.na(chr) | chr == oldMapChr) %>% 
   arrange(oldMapChr,oldMapPos)
  
 intPos = interpolate(subMarkerMap$oldMapPos,subMarkerMap$newMapPos)[,3]
@@ -450,7 +450,7 @@ markerMapRes[testData$Q_ID,"newMapPos"] = interpolate(testData$Sbegin,testData$n
  
 # another 6 markers without physicla position. 
 subMarkerMap = markerMapRes %>% 
-  filter(oldMapChr == testChr) %>% 
+  filter(oldMapChr == testChr, is.na(chr) | chr == oldMapChr) %>% 
   arrange(oldMapChr,oldMapPos)
  
 intPos = interpolate(subMarkerMap$oldMapPos,subMarkerMap$newMapPos)[,3]
@@ -718,7 +718,7 @@ markerMapRes[testData$Q_ID,"newMapPos"] = interpolate(testData$Sbegin,testData$n
 # another 1 markers without physicla position. 
  
 subMarkerMap = markerMapRes %>% 
-  filter(oldMapChr == testChr) %>% 
+  filter(oldMapChr == testChr, is.na(chr) | chr == oldMapChr) %>% 
   arrange(oldMapChr,oldMapPos)
  
 intPos = interpolate(subMarkerMap$oldMapPos,subMarkerMap$newMapPos)[,3]
@@ -747,7 +747,7 @@ markerMapRes[testData$Q_ID,"newMapPos"] = interpolate(testData$Sbegin,testData$n
 # another 2 markers without physicla position. 
  
 subMarkerMap = markerMapRes %>% 
-  filter(oldMapChr == testChr) %>% 
+  filter(oldMapChr == testChr, is.na(chr) | chr == oldMapChr) %>% 
   arrange(oldMapChr,oldMapPos)
  
 intPos = interpolate(subMarkerMap$oldMapPos,subMarkerMap$newMapPos)[,3]
@@ -836,7 +836,7 @@ markerMapRes[testData$Q_ID,"newMapPos"] = interpolate(testData$Sbegin,testData$n
 # another 1 markers without physicla position. 
  
 subMarkerMap = markerMapRes %>% 
-  filter(oldMapChr == testChr) %>% 
+  filter(oldMapChr == testChr, is.na(chr) | chr == oldMapChr) %>% 
   arrange(oldMapChr,oldMapPos)
  
 intPos = interpolate(subMarkerMap$oldMapPos,subMarkerMap$newMapPos)[,3]
@@ -914,7 +914,7 @@ markerMapRes[testData$Q_ID,"newMapPos"] = interpolate(testData$Sbegin,testData$n
 # another markers without physicla position. 
  
 subMarkerMap = markerMapRes %>% 
-  filter(oldMapChr == testChr) %>% 
+  filter(oldMapChr == testChr, is.na(chr) | chr == oldMapChr) %>% 
   arrange(oldMapChr,oldMapPos)
  
 intPos = interpolate(subMarkerMap$oldMapPos,subMarkerMap$newMapPos)[,3]
