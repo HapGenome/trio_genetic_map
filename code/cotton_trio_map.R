@@ -1,5 +1,6 @@
 #### Cotton map ####
 library(readxl)
+library(tidyverse)
 source("/mnt/repo/trio_genetic_map/code/trio_mapping_functions.R")
  
  
