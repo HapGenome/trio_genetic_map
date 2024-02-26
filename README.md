@@ -1,6 +1,6 @@
-# trio_genetic_map
+# trio based genetic map construction
 ## Description
-The purpose of this project is to _denovo_ construct a consensus genetic map, by leveraging a high quality genome and Trio mapping
+The purpose of this project is to _denovo_ construct a consensus genetic map, by leveraging a high quality genome and Trio mapping. Trio includes a progeny and two parents. 
 
 ## Motivation: Why trio-based mapping?
 A high-quality consensus genetic map plays a critical role in many key breeding and biotech processes, such as gene discovery, trait integration, haplotype construction, marker selection, and genotype imputation. This trio-based mapping method has four key advantages over our current method of bi-parental mapping. 
